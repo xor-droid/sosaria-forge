@@ -38,7 +38,17 @@ enum {
     OPT_FLAT,
     OPT_FLAT_Z,
     OPT_RIVERS,
-    OPT_RIVER_DENSITY
+    OPT_RIVER_DENSITY,
+    OPT_NO_BIOMES,
+    OPT_TEMP_BIAS,
+    OPT_NO_VEG,
+    OPT_TREE_DEN,
+    OPT_ROCK_DEN,
+    OPT_PLANT_DEN,
+    OPT_NO_BEACHES,
+    OPT_BEACH_WIDTH,
+    OPT_NO_LAKES,
+    OPT_NO_PASSES
 };
 
 static void print_version(void) {
@@ -85,7 +95,18 @@ static void print_help(const char *argv0) {
 "                            (default: auto = frequency*0.5).\n"
 "  --rivers              Carve downhill rivers from high ground to the sea.\n"
 "  --river-density <n>       How many rivers: number of sources, higher = more\n"
-"                            (default: auto ~ (w+h)/160; e.g. 20 sparse, 120 dense).\n"
+"                            (default: auto ~ (w+h)/400; e.g. 10 sparse, 120 dense).\n"
+"  Enrichment (all ON by default; use the --no-* flags to disable):\n"
+"  --no-biomes               Disable climate biomes (snow/desert/jungle/swamp).\n"
+"  --temperature-bias <f>    Shift climate warmer(+)/colder(-) (default 0).\n"
+"  --no-vegetation           Skip tree/rock/plant statics (statics stay empty).\n"
+"  --tree-density <f>        Tree fraction of eligible cells, 0..1 (default 0.08).\n"
+"  --rock-density <f>        Rock/boulder fraction, 0..1 (default 0.02).\n"
+"  --plant-density <f>       Ground-cover fraction, 0..1 (default 0.05).\n"
+"  --no-beaches              Skip sloped sand beaches around coasts.\n"
+"  --beach-width <int>       Beach band width in tiles (default 4).\n"
+"  --no-lakes                Skip lakes at inland river sinks.\n"
+"  --no-passes               Skip carving walkable passes through mountains.\n"
 "  --tiledata <path>     tiledata.mul used to sanity-check tile flags\n"
 "                        (default ./ref/UONewDawn/tiledata.mul; optional).\n"
 "  --preview <file.png>  Also render a top-down preview image.\n"
@@ -164,6 +185,16 @@ int main(int argc, char **argv) {
         { "flat-z",      required_argument, 0, OPT_FLAT_Z },
         { "rivers",      no_argument,       0, OPT_RIVERS },
         { "river-density",      required_argument, 0, OPT_RIVER_DENSITY },
+        { "no-biomes",   no_argument,       0, OPT_NO_BIOMES },
+        { "temperature-bias",   required_argument, 0, OPT_TEMP_BIAS },
+        { "no-vegetation", no_argument,     0, OPT_NO_VEG },
+        { "tree-density",       required_argument, 0, OPT_TREE_DEN },
+        { "rock-density",       required_argument, 0, OPT_ROCK_DEN },
+        { "plant-density",      required_argument, 0, OPT_PLANT_DEN },
+        { "no-beaches",  no_argument,       0, OPT_NO_BEACHES },
+        { "beach-width",        required_argument, 0, OPT_BEACH_WIDTH },
+        { "no-lakes",    no_argument,       0, OPT_NO_LAKES },
+        { "no-passes",   no_argument,       0, OPT_NO_PASSES },
         { "tiledata",    required_argument, 0, 'T' },
         { "preview",     required_argument, 0, 'P' },
         { "emit-mapdef", no_argument,       0, 'M' },
@@ -205,6 +236,16 @@ int main(int argc, char **argv) {
             case OPT_FLAT_Z:        cfg.flat = 1; cfg.flat_z = (int)strtol(optarg, NULL, 0); break;
             case OPT_RIVERS:        cfg.rivers = 1; break;
             case OPT_RIVER_DENSITY: cfg.rivers = 1; cfg.river_density = (int)strtol(optarg, NULL, 0); break;
+            case OPT_NO_BIOMES:     cfg.biomes = 0; break;
+            case OPT_TEMP_BIAS:     cfg.temperature_bias = strtod(optarg, NULL); break;
+            case OPT_NO_VEG:        cfg.vegetation = 0; break;
+            case OPT_TREE_DEN:      cfg.tree_density = strtod(optarg, NULL); break;
+            case OPT_ROCK_DEN:      cfg.rock_density = strtod(optarg, NULL); break;
+            case OPT_PLANT_DEN:     cfg.plant_density = strtod(optarg, NULL); break;
+            case OPT_NO_BEACHES:    cfg.beaches = 0; break;
+            case OPT_BEACH_WIDTH:   cfg.beach_width = (int)strtol(optarg, NULL, 0); break;
+            case OPT_NO_LAKES:      cfg.lakes = 0; break;
+            case OPT_NO_PASSES:     cfg.passes = 0; break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;
             case 'P': snprintf(cfg.preview_path, sizeof(cfg.preview_path), "%s", optarg); break;
             case 'M': cfg.emit_mapdef = 1; break;
@@ -245,7 +286,7 @@ int main(int argc, char **argv) {
     if (mapwriter_write(&grid, cfg.out_dir, cfg.map_index) != 0) rc = 1;
 
     if (rc == 0 && !cfg.terrain_only)
-        if (statics_write_empty(cfg.out_dir, cfg.map_index, BW, BH) != 0) rc = 1;
+        if (statics_write(&grid, &cfg, cfg.out_dir, cfg.map_index) != 0) rc = 1;
 
     if (rc == 0 && cfg.preview_path[0])
         if (preview_write_png(&grid, cfg.preview_path) != 0) rc = 1;

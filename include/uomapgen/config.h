@@ -41,6 +41,16 @@ typedef struct {
     double   mountain_scale;     /* mountain ridge frequency (0 = auto from frequency) */
     int      rivers;        /* bool: carve downhill rivers from high ground */
     int      river_density;      /* source count (0 = auto from map size) */
+    int      biomes;        /* bool: climate-band biomes (snow/desert/jungle/swamp) */
+    double   temperature_bias;   /* shift climate warmer(+)/colder(-) */
+    int      vegetation;    /* bool: place tree/rock/plant statics */
+    double   tree_density;       /* [0,1] fraction of eligible cells with a tree */
+    double   rock_density;       /* [0,1] rocks/boulders on hills/mountains */
+    double   plant_density;      /* [0,1] ground cover (plants/flowers/ferns) */
+    int      beaches;       /* bool: sloped sand beaches around all coasts */
+    int      beach_width;        /* beach band width in tiles */
+    int      lakes;         /* bool: form lakes at inland river sinks */
+    int      passes;        /* bool: carve walkable passes through mountains */
     int      emit_mapdef;   /* bool: also write map-definitions.snippet.json */
     int      terrain_only;  /* bool: write only mapN.mul (skip statics) */
     char     out_dir[UOMG_PATH_MAX];

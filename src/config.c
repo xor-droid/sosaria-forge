@@ -34,6 +34,16 @@ void config_defaults(mapgen_config *cfg) {
     cfg->mountain_scale     = 0.0;   /* 0 => auto (frequency * 0.5) */
     cfg->rivers             = 0;
     cfg->river_density      = 0;
+    cfg->biomes             = 1;
+    cfg->temperature_bias   = 0.0;
+    cfg->vegetation         = 1;
+    cfg->tree_density        = 0.08;
+    cfg->rock_density        = 0.02;
+    cfg->plant_density       = 0.05;
+    cfg->beaches            = 1;
+    cfg->beach_width        = 4;
+    cfg->lakes              = 1;
+    cfg->passes             = 1;
     cfg->emit_mapdef = 0;
     cfg->terrain_only = 0;
     snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", "./out");
@@ -117,6 +127,26 @@ int config_set_kv(mapgen_config *cfg, const char *key_in, const char *val) {
         if (parse_bool(val, &cfg->rivers) != 0) return -1;
     } else if (!strcmp(key, "river_density")) {
         cfg->river_density = (int)strtol(val, NULL, 0);
+    } else if (!strcmp(key, "biomes")) {
+        if (parse_bool(val, &cfg->biomes) != 0) return -1;
+    } else if (!strcmp(key, "temperature_bias")) {
+        cfg->temperature_bias = strtod(val, NULL);
+    } else if (!strcmp(key, "vegetation")) {
+        if (parse_bool(val, &cfg->vegetation) != 0) return -1;
+    } else if (!strcmp(key, "tree_density")) {
+        cfg->tree_density = strtod(val, NULL);
+    } else if (!strcmp(key, "rock_density")) {
+        cfg->rock_density = strtod(val, NULL);
+    } else if (!strcmp(key, "plant_density")) {
+        cfg->plant_density = strtod(val, NULL);
+    } else if (!strcmp(key, "beaches")) {
+        if (parse_bool(val, &cfg->beaches) != 0) return -1;
+    } else if (!strcmp(key, "beach_width")) {
+        cfg->beach_width = (int)strtol(val, NULL, 0);
+    } else if (!strcmp(key, "lakes")) {
+        if (parse_bool(val, &cfg->lakes) != 0) return -1;
+    } else if (!strcmp(key, "passes")) {
+        if (parse_bool(val, &cfg->passes) != 0) return -1;
     } else if (!strcmp(key, "out")) {
         snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", val);
     } else if (!strcmp(key, "tiledata")) {
@@ -255,6 +285,14 @@ int config_validate(const mapgen_config *cfg) {
     }
     if (cfg->rivers && cfg->river_density < 0) {
         fprintf(stderr, "error: river-density (%d) must be >= 0\n", cfg->river_density); ok = 0;
+    }
+    if (cfg->tree_density < 0.0 || cfg->tree_density > 1.0 ||
+        cfg->rock_density < 0.0 || cfg->rock_density > 1.0 ||
+        cfg->plant_density < 0.0 || cfg->plant_density > 1.0) {
+        fprintf(stderr, "error: densities (tree/rock/plant) must be in [0,1]\n"); ok = 0;
+    }
+    if (cfg->beaches && (cfg->beach_width < 0 || cfg->beach_width > 64)) {
+        fprintf(stderr, "error: beach-width (%d) must be in 0..64\n", cfg->beach_width); ok = 0;
     }
     if (cfg->continent) {
         if (cfg->continent_radius < 0.0 || cfg->continent_radius >= 1.0) {

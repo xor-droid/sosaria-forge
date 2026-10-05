@@ -26,7 +26,9 @@ add_executable(uomapgen
   src/io.c
   src/noise.c
   src/tiledata.c
+  src/biome.c
   src/terrain.c
+  src/vegetation.c
   src/mapwriter.c
   src/statics.c
   src/preview.c

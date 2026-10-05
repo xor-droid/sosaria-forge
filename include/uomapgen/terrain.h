@@ -16,12 +16,17 @@
 enum {
     TCAT_WATER_DEEP = 0,
     TCAT_WATER_SHALLOW,
-    TCAT_SAND,
+    TCAT_SAND,          /* beach sand (also fords) */
     TCAT_GRASS,
     TCAT_FOREST,
     TCAT_HILL,
     TCAT_MOUNTAIN,
     TCAT_RIVER,
+    TCAT_DESERT,
+    TCAT_JUNGLE,
+    TCAT_SWAMP,
+    TCAT_SNOW,
+    TCAT_LAKE,
     TCAT_COUNT
 };
 

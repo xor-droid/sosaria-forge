@@ -1,9 +1,19 @@
 #include "uomapgen/terrain.h"
 #include "uomapgen/noise.h"
+#include "uomapgen/biome.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+/* Deterministic per-cell hash (for tile variation). */
+static uint64_t cell_hash(uint64_t seed, int x, int y, uint32_t salt) {
+    uint64_t s = seed
+               ^ (0x100000001B3ULL * (uint64_t)(uint32_t)x)
+               ^ (0xC2B2AE3D27D4EB4FULL * (uint64_t)(uint32_t)y)
+               ^ ((uint64_t)salt << 48);
+    return noise_splitmix64(&s);
+}
 
 /*
  * Centralized land-tile palette (classic UO land tile IDs, verified against the
@@ -36,7 +46,9 @@ static int clampi(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-#define IS_WATER_CAT(c) ((c) == TCAT_WATER_DEEP || (c) == TCAT_WATER_SHALLOW || (c) == TCAT_RIVER)
+#define IS_WATER_CAT(c) ((c) == TCAT_WATER_DEEP || (c) == TCAT_WATER_SHALLOW || \
+                         (c) == TCAT_RIVER || (c) == TCAT_LAKE)
+#define IS_OCEAN_CAT(c) ((c) == TCAT_WATER_DEEP || (c) == TCAT_WATER_SHALLOW)
 #define IS_FIXED_CAT(c) (IS_WATER_CAT(c) || (c) == TCAT_MOUNTAIN)
 
 /* Slope-limiting relaxation so adjacent WALKABLE land cells never differ by
@@ -139,6 +151,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
      * Each becomes a small compact land bridge (not a long sandbar). */
     const int FORD_STEP = 120;
     int *fordAnchors = NULL; int nFord = 0, capFord = 0;
+    int *lakeAnchors = NULL; int nLake = 0, capLake = 0;  /* river sinks -> ponds */
 
     /* Collect one highest candidate per coarse cell (mountain if available). */
     typedef struct { float h; int idx; } cand;
@@ -221,8 +234,19 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                 }
             if (best < 0) break;
             /* If the lowest reachable neighbor is not lower (beyond a small
-             * tolerance for coastline-warp dips), the river ends in a lake. */
-            if (bh > hf[cur] + 0.01f) break;
+             * tolerance for coastline-warp dips), the river ends in a sink: it
+             * stops here and (if lakes are on) this spot becomes a pond. */
+            if (bh > hf[cur] + 0.01f) {
+                if (cfg->lakes) {
+                    if (nLake == capLake) {
+                        int nc2 = capLake ? capLake * 2 : 64;
+                        int *tmp = (int *)realloc(lakeAnchors, (size_t)nc2 * sizeof(int));
+                        if (tmp) { lakeAnchors = tmp; capLake = nc2; }
+                    }
+                    if (nLake < capLake) lakeAnchors[nLake++] = cur;
+                }
+                break;
+            }
 
             /* Meander: rotate the steepest-descent direction by a smooth
              * noise-driven angle, then flow to the downhill neighbour best
@@ -346,10 +370,153 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
     }
     free(fordAnchors);
 
-    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld fords (%ld cells)\n",
-            cap, carved, reached, fordsPlaced, fords);
+    /* Lakes: flood a small pond at each inland river sink (not near ocean), so
+     * rivers that don't reach the sea feed a lake instead of just stopping. */
+    long lakesPlaced = 0;
+    for (int a = 0; a < nLake; ++a) {
+        int start = lakeAnchors[a];
+        if (IS_OCEAN_CAT(g->cat[start])) continue;
+        int sx = start % W, sy = start / W, nearSea = 0;
+        for (int dy = -4; dy <= 4 && !nearSea; ++dy)
+            for (int dx = -4; dx <= 4; ++dx) {
+                int nx = sx + dx, ny = sy + dy;
+                if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                if (IS_OCEAN_CAT(g->cat[nx + ny * W])) { nearSea = 1; break; }
+            }
+        if (nearSea) continue;
+        int lz = g->z[start];
+        int qh = 0, qt = 0;
+        q[qt] = start; qd[qt] = 0; qt++;
+        while (qh < qt) {
+            int c = q[qh]; int d = qd[qh]; qh++;
+            if (g->cat[c] == TCAT_MOUNTAIN || IS_OCEAN_CAT(g->cat[c])) continue;
+            g->cat[c] = TCAT_LAKE;
+            g->id[c]  = biome_tile(TCAT_LAKE, cell_hash(cfg->seed, c % W, c / W, NOISE_LAYER_BIOME));
+            g->z[c]   = (int8_t)clampi(lz, -128, 127);
+            ++lakesPlaced;
+            if (d < 2) {
+                int nb[4] = { c - 1, c + 1, c - W, c + W };
+                for (int k = 0; k < 4; ++k) {
+                    int nn = nb[k];
+                    if (nn < 0 || nn >= W * H) continue;
+                    int nc3 = g->cat[nn];
+                    if (nc3 != TCAT_MOUNTAIN && !IS_OCEAN_CAT(nc3) && nc3 != TCAT_LAKE
+                        && qt < 512) { q[qt] = nn; qd[qt] = d + 1; qt++; }
+                }
+            }
+        }
+    }
+    free(lakeAnchors);
+
+    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld fords (%ld cells), %ld lakes\n",
+            cap, carved, reached, fordsPlaced, fords, lakesPlaced);
     noise_layer_free(mnd);
     free(cs);
+}
+
+/* Sloped sand beaches around every ocean coast: land within beach_width of the
+ * sea becomes sand, with z ramped from the shore (water_z) up to the inland
+ * height, so coasts slope instead of cliffing. Rivers/lakes/mountains excluded. */
+static void beach_pass(terrain_grid *g, const mapgen_config *cfg) {
+    const int W = g->width, H = g->height;
+    const size_t n = (size_t)W * (size_t)H;
+    const int bw = cfg->beach_width;
+    if (bw < 1) return;
+    uint8_t *dist = (uint8_t *)malloc(n);
+    if (!dist) return;
+    for (size_t i = 0; i < n; ++i) dist[i] = IS_OCEAN_CAT(g->cat[i]) ? 0 : 255;
+
+    for (int d = 1; d <= bw; ++d)
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                int i = x + y * W;
+                if (dist[i] != 255) continue;
+                int c = g->cat[i];
+                if (c == TCAT_MOUNTAIN || IS_WATER_CAT(c)) continue;
+                int adj = (x > 0 && dist[i-1] == d-1) || (x < W-1 && dist[i+1] == d-1)
+                       || (y > 0 && dist[i-W] == d-1) || (y < H-1 && dist[i+W] == d-1);
+                if (!adj) continue;
+                dist[i] = (uint8_t)d;
+                double f = (double)d / (double)bw;      /* shore .. inland */
+                int zl = g->z[i];
+                int zb = cfg->water_z + (int)lround((zl - cfg->water_z) * f);
+                g->cat[i] = TCAT_SAND;
+                g->id[i]  = biome_tile(TCAT_SAND, cell_hash(cfg->seed, x, y, NOISE_LAYER_BIOME));
+                g->z[i]   = (int8_t)clampi(zb, -128, 127);
+            }
+    free(dist);
+}
+
+static int is_walkable_land(const terrain_grid *g, int i) {
+    int c = g->cat[i];
+    return !(IS_WATER_CAT(c) || c == TCAT_MOUNTAIN);
+}
+
+/* Mountain passes: carve ~3-wide walkable corridors (dirt) through mountain
+ * bands up to MAXTHICK thick at regular intervals along both axes, so interior
+ * valleys aren't sealed off. Heuristic but bounded and deterministic. */
+static void carve_passes(terrain_grid *g, const mapgen_config *cfg) {
+    const int W = g->width, H = g->height;
+    const int SPACING = 160, MAXTHICK = 48;
+
+    for (int y = SPACING / 2; y < H; y += SPACING) {
+        int x = 0;
+        while (x < W) {
+            int i = x + y * W;
+            if (g->cat[i] == TCAT_MOUNTAIN && x > 0 && is_walkable_land(g, i - 1)) {
+                int zL = g->z[i - 1], e = x;
+                while (e < W && g->cat[e + y * W] == TCAT_MOUNTAIN && (e - x) < MAXTHICK) ++e;
+                if (e < W && e > x && is_walkable_land(g, e + y * W)) {
+                    int zR = g->z[e + y * W], len = e - x;
+                    for (int p = x; p < e; ++p) {
+                        double f = (double)(p - x + 1) / (double)(len + 1);
+                        int zz = zL + (int)lround((zR - zL) * f);
+                        for (int yy = y - 1; yy <= y + 1; ++yy) {
+                            if (yy < 0 || yy >= H) continue;
+                            int j = p + yy * W;
+                            if (g->cat[j] == TCAT_MOUNTAIN) {
+                                g->cat[j] = TCAT_HILL;
+                                g->id[j]  = biome_tile(TCAT_HILL, cell_hash(cfg->seed, p, yy, NOISE_LAYER_BIOME));
+                                g->z[j]   = (int8_t)clampi(zz, -128, 127);
+                            }
+                        }
+                    }
+                }
+                x = e > x ? e : x + 1;
+                continue;
+            }
+            ++x;
+        }
+    }
+    for (int x = SPACING / 2; x < W; x += SPACING) {
+        int y = 0;
+        while (y < H) {
+            int i = x + y * W;
+            if (g->cat[i] == TCAT_MOUNTAIN && y > 0 && is_walkable_land(g, i - W)) {
+                int zT = g->z[i - W], e = y;
+                while (e < H && g->cat[x + e * W] == TCAT_MOUNTAIN && (e - y) < MAXTHICK) ++e;
+                if (e < H && e > y && is_walkable_land(g, x + e * W)) {
+                    int zB = g->z[x + e * W], len = e - y;
+                    for (int p = y; p < e; ++p) {
+                        double f = (double)(p - y + 1) / (double)(len + 1);
+                        int zz = zT + (int)lround((zB - zT) * f);
+                        for (int xx = x - 1; xx <= x + 1; ++xx) {
+                            if (xx < 0 || xx >= W) continue;
+                            int j = xx + p * W;
+                            if (g->cat[j] == TCAT_MOUNTAIN) {
+                                g->cat[j] = TCAT_HILL;
+                                g->id[j]  = biome_tile(TCAT_HILL, cell_hash(cfg->seed, xx, p, NOISE_LAYER_BIOME));
+                                g->z[j]   = (int8_t)clampi(zz, -128, 127);
+                            }
+                        }
+                    }
+                }
+                y = e > y ? e : y + 1;
+                continue;
+            }
+            ++y;
+        }
+    }
 }
 
 int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
@@ -372,7 +539,10 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     noise_layer *moist = noise_layer_create(cfg->seed, NOISE_LAYER_MOISTURE,
                                              cfg->frequency * 2.0,
                                              cfg->octaves > 2 ? cfg->octaves - 1 : cfg->octaves);
-    noise_layer *cont = NULL, *mtn = NULL;
+    noise_layer *cont = NULL, *mtn = NULL, *temp = NULL;
+    if (cfg->biomes)
+        temp = noise_layer_create(cfg->seed, NOISE_LAYER_TEMPERATURE,
+                                  cfg->frequency * 0.6, 3);
     if (cfg->continents)
         cont = noise_layer_create(cfg->seed, NOISE_LAYER_CONTINENT,
                                   cfg->continent_scale, cfg->octaves > 4 ? 4 : cfg->octaves);
@@ -385,9 +555,10 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
         mtn = noise_layer_create_ridged(cfg->seed, NOISE_LAYER_DETAIL, mfreq,
                                         cfg->octaves > 4 ? 4 : cfg->octaves);
     }
-    if (!elev || !moist || (cfg->continents && !cont) || (cfg->mountains && !mtn)) {
+    if (!elev || !moist || (cfg->continents && !cont) || (cfg->mountains && !mtn)
+        || (cfg->biomes && !temp)) {
         noise_layer_free(elev); noise_layer_free(moist);
-        noise_layer_free(cont); noise_layer_free(mtn);
+        noise_layer_free(cont); noise_layer_free(mtn); noise_layer_free(temp);
         free(hf); terrain_free(g); return -1;
     }
 
@@ -507,20 +678,28 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
 
                 height = (float)route;
 
+                double mo = noise_layer_sample(moist, x, y);
                 if (isMountain) {
                     cat = TCAT_MOUNTAIN;
-                } else if (hh < 0.06) {
-                    cat = TCAT_SAND;
                 } else if (hh > 0.72) {
                     cat = TCAT_HILL;
+                } else if (cfg->biomes) {
+                    /* Climate: temperature by latitude (poles cold, centre hot),
+                     * modulated by noise and cooled with elevation. */
+                    double ny2 = (H > 1) ? (double)y / (double)(H - 1) : 0.5;
+                    double lat = 1.0 - 2.0 * fabs(ny2 - 0.5);       /* 0 poles .. 1 centre */
+                    double temperature = (lat * 2.0 - 1.0) * 0.65
+                                       + noise_layer_sample(temp, x, y) * 0.25
+                                       - hh * 0.5 + cfg->temperature_bias;
+                    cat = biome_classify(hh, temperature, mo);
                 } else {
-                    double mo = noise_layer_sample(moist, x, y);
                     cat = (mo > 0.1) ? TCAT_FOREST : TCAT_GRASS;
                 }
             }
 
+            uint64_t hash = cell_hash(cfg->seed, x, y, NOISE_LAYER_BIOME);
             g->cat[i] = (uint8_t)cat;
-            g->id[i]  = tile_for_cat(cat);
+            g->id[i]  = biome_tile(cat, hash);
             g->z[i]   = (int8_t)clampi(z, -128, 127);
             hf[i]     = height;
         }
@@ -529,13 +708,19 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     if (cfg->rivers)
         carve_rivers(g, cfg, hf);
 
+    if (cfg->beaches)
+        beach_pass(g, cfg);
+
+    if (cfg->passes && cfg->mountains)
+        carve_passes(g, cfg);
+
     /* Flat mode is already level; slope-limiting would only pull coastal land
      * down toward the ocean, so skip it. */
     if (!cfg->flat)
         limit_slope(g, cfg);
 
     noise_layer_free(elev); noise_layer_free(moist);
-    noise_layer_free(cont); noise_layer_free(mtn);
+    noise_layer_free(cont); noise_layer_free(mtn); noise_layer_free(temp);
     free(hf);
     return 0;
 }
