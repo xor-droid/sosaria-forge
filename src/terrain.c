@@ -100,9 +100,19 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                                             cfg->frequency, cfg->octaves);
     noise_layer *moist = noise_layer_create(cfg->seed, NOISE_LAYER_MOISTURE,
                                              cfg->frequency * 2.0, cfg->octaves > 2 ? cfg->octaves - 1 : cfg->octaves);
-    if (!elev || !moist) {
+    noise_layer *cont = NULL;
+    if (cfg->continents) {
+        /* Low-frequency mask that carves several landmasses of varying size.
+         * Few octaves keeps the continents coherent while still giving a mix
+         * of large masses and smaller islands. */
+        int moct = cfg->octaves > 4 ? 4 : cfg->octaves;
+        cont = noise_layer_create(cfg->seed, NOISE_LAYER_CONTINENT,
+                                  cfg->continent_scale, moct);
+    }
+    if (!elev || !moist || (cfg->continents && !cont)) {
         noise_layer_free(elev);
         noise_layer_free(moist);
+        noise_layer_free(cont);
         terrain_free(g);
         return -1;
     }
@@ -120,16 +130,31 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
             size_t i = (size_t)x + (size_t)y * (size_t)W;
-            double e = noise_layer_sample(elev, x, y);  /* ~[-1,1] */
+            double e_detail = noise_layer_sample(elev, x, y);  /* ~[-1,1] */
+            double e;
             int cat;
             int z;
 
-            /* Central-continent mask: a solid-land core out to continent_radius,
-             * then rising ocean pressure toward the edges, so a single landmass
-             * sits in the middle ringed by ocean on all sides. d is clamped
-             * Euclidean distance (1.0 at the nearest edge), so every edge drowns,
-             * not just the corners. */
-            if (cfg->continent) {
+            if (cfg->continents) {
+                /* Multiple continents: a low-frequency mask decides land vs sea
+                 * (several masses of various sizes), detail noise roughens the
+                 * coastlines, and a gentle falloff keeps the map's outer ring
+                 * ocean so continents don't run off the edge. */
+                double mask = noise_layer_sample(cont, x, y);
+                e = 0.80 * mask + 0.20 * e_detail;
+                double nx = (double)x * inv_halfw - 1.0;
+                double ny = (double)y * inv_halfh - 1.0;
+                double d = sqrt(nx * nx + ny * ny);
+                if (d > 1.0) d = 1.0;
+                double t = (d - 0.80) / (1.0 - 0.80);  /* only the outer 20% */
+                if (t < 0.0) t = 0.0;
+                e -= 1.6 * (t * t);
+            } else if (cfg->continent) {
+                /* Single central continent: a solid-land core out to
+                 * continent_radius, then rising ocean pressure toward the edges.
+                 * d is clamped Euclidean distance (1.0 at the nearest edge), so
+                 * every edge drowns, not just the corners. */
+                e = e_detail;
                 double nx = (double)x * inv_halfw - 1.0;  /* [-1,1] */
                 double ny = (double)y * inv_halfh - 1.0;  /* [-1,1] */
                 double d = sqrt(nx * nx + ny * ny);
@@ -138,6 +163,8 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 double t = (d - r0) / (1.0 - r0);         /* 0 at core edge, 1 at map edge */
                 if (t < 0.0) t = 0.0;
                 e -= cfg->continent_strength * pow(t, cfg->continent_power);
+            } else {
+                e = e_detail;
             }
 
             if (e < sea) {
@@ -170,6 +197,7 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
 
     noise_layer_free(elev);
     noise_layer_free(moist);
+    noise_layer_free(cont);
     return 0;
 }
 

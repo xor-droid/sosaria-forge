@@ -28,7 +28,8 @@
 enum {
     OPT_CONT_RADIUS = 1000,
     OPT_CONT_STRENGTH,
-    OPT_CONT_POWER
+    OPT_CONT_POWER,
+    OPT_CONT_SCALE
 };
 
 static void print_version(void) {
@@ -63,6 +64,9 @@ static void print_help(const char *argv0) {
 "  --continent-radius <f>    Solid-land core radius, [0,1) (default 0.55; implies --continent).\n"
 "  --continent-strength <f>  How hard edges fall to ocean (default 2.0; implies --continent).\n"
 "  --continent-power <f>     Falloff curvature (default 2.0; implies --continent).\n"
+"  --continents          Multiple continents of varying size (not one landmass).\n"
+"  --continent-scale <f>     Continent-mask frequency; smaller = bigger landmasses\n"
+"                            (default 0.00045; implies --continents).\n"
 "  --tiledata <path>     tiledata.mul used to sanity-check tile flags\n"
 "                        (default ./ref/UONewDawn/tiledata.mul; optional).\n"
 "  --preview <file.png>  Also render a top-down preview image.\n"
@@ -130,6 +134,8 @@ int main(int argc, char **argv) {
         { "continent-radius",   required_argument, 0, OPT_CONT_RADIUS },
         { "continent-strength", required_argument, 0, OPT_CONT_STRENGTH },
         { "continent-power",    required_argument, 0, OPT_CONT_POWER },
+        { "continents",  no_argument,       0, 'A' },
+        { "continent-scale",    required_argument, 0, OPT_CONT_SCALE },
         { "tiledata",    required_argument, 0, 'T' },
         { "preview",     required_argument, 0, 'P' },
         { "emit-mapdef", no_argument,       0, 'M' },
@@ -138,7 +144,7 @@ int main(int argc, char **argv) {
         { "version",     no_argument,       0, 'v' },
         { 0, 0, 0, 0 }
     };
-    const char *optstr = "s:c:m:W:H:p:o:L:f:O:S:Z:w:CT:P:Mthv";
+    const char *optstr = "s:c:m:W:H:p:o:L:f:O:S:Z:w:CAT:P:Mthv";
 
     int c, idx;
     while ((c = getopt_long(argc, argv, optstr, longopts, &idx)) != -1) {
@@ -160,6 +166,8 @@ int main(int argc, char **argv) {
             case OPT_CONT_RADIUS:   cfg.continent = 1; cfg.continent_radius = strtod(optarg, NULL); break;
             case OPT_CONT_STRENGTH: cfg.continent = 1; cfg.continent_strength = strtod(optarg, NULL); break;
             case OPT_CONT_POWER:    cfg.continent = 1; cfg.continent_power = strtod(optarg, NULL); break;
+            case 'A': cfg.continents = 1; break;
+            case OPT_CONT_SCALE:    cfg.continents = 1; cfg.continent_scale = strtod(optarg, NULL); break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;
             case 'P': snprintf(cfg.preview_path, sizeof(cfg.preview_path), "%s", optarg); break;
             case 'M': cfg.emit_mapdef = 1; break;

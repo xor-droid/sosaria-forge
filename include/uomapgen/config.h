@@ -26,10 +26,12 @@ typedef struct {
     int      max_slope;     /* max |z| step between adjacent land tiles */
     int      land_z_max;    /* highest land z produced from elevation */
     int      water_z;       /* flat z assigned to water cells */
-    int      continent;     /* bool: apply radial falloff -> central continent */
+    int      continent;     /* bool: apply radial falloff -> single central continent */
     double   continent_radius;   /* [0,1): solid-land core radius before falloff */
     double   continent_strength; /* how hard edges are pushed to ocean (>0) */
     double   continent_power;    /* falloff curvature (>0) */
+    int      continents;    /* bool: multiple continents via low-freq mask noise */
+    double   continent_scale;    /* frequency of the continent mask (smaller = bigger) */
     int      emit_mapdef;   /* bool: also write map-definitions.snippet.json */
     int      terrain_only;  /* bool: write only mapN.mul (skip statics) */
     char     out_dir[UOMG_PATH_MAX];

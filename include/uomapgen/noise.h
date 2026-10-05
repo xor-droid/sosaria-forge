@@ -18,7 +18,8 @@
 enum {
     NOISE_LAYER_ELEVATION = 0x01,
     NOISE_LAYER_MOISTURE  = 0x02,
-    NOISE_LAYER_DETAIL    = 0x03
+    NOISE_LAYER_DETAIL    = 0x03,
+    NOISE_LAYER_CONTINENT = 0x04
 };
 
 /* splitmix64: fixed, portable 64-bit mixer used for seed derivation. */

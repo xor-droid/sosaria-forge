@@ -3,6 +3,7 @@
 
 # Generated map data and previews
 /out/
+/out_*/
 *.mul
 *.png
 

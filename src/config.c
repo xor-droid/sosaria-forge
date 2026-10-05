@@ -23,6 +23,8 @@ void config_defaults(mapgen_config *cfg) {
     cfg->continent_radius   = 0.55;
     cfg->continent_strength = 2.0;
     cfg->continent_power    = 2.0;
+    cfg->continents         = 0;
+    cfg->continent_scale    = 0.00045;
     cfg->emit_mapdef = 0;
     cfg->terrain_only = 0;
     snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", "./out");
@@ -84,6 +86,10 @@ int config_set_kv(mapgen_config *cfg, const char *key_in, const char *val) {
         cfg->continent_strength = strtod(val, NULL);
     } else if (!strcmp(key, "continent_power")) {
         cfg->continent_power = strtod(val, NULL);
+    } else if (!strcmp(key, "continents")) {
+        if (parse_bool(val, &cfg->continents) != 0) return -1;
+    } else if (!strcmp(key, "continent_scale")) {
+        cfg->continent_scale = strtod(val, NULL);
     } else if (!strcmp(key, "out")) {
         snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", val);
     } else if (!strcmp(key, "tiledata")) {
@@ -201,6 +207,9 @@ int config_validate(const mapgen_config *cfg) {
     }
     if (cfg->water_z < -128 || cfg->water_z > 127) {
         fprintf(stderr, "error: water-z (%d) must be in -128..127\n", cfg->water_z); ok = 0;
+    }
+    if (cfg->continents && cfg->continent_scale <= 0.0) {
+        fprintf(stderr, "error: continent-scale (%g) must be > 0\n", cfg->continent_scale); ok = 0;
     }
     if (cfg->continent) {
         if (cfg->continent_radius < 0.0 || cfg->continent_radius >= 1.0) {
