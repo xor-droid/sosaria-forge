@@ -135,6 +135,11 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
     noise_layer *mnd = noise_layer_create(cfg->seed, NOISE_LAYER_MEANDER, 0.012, 2);
     const double MEANDER_MAX = 1.15;  /* max angular deflection (radians) */
 
+    /* Ford anchors: one crossing every FORD_STEP cells along each river path.
+     * Each becomes a small compact land bridge (not a long sandbar). */
+    const int FORD_STEP = 120;
+    int *fordAnchors = NULL; int nFord = 0, capFord = 0;
+
     /* Collect one highest candidate per coarse cell (mountain if available). */
     typedef struct { float h; int idx; } cand;
     cand *cs = (cand *)malloc((size_t)gx * gy * sizeof(cand));
@@ -192,6 +197,15 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                 g->id[cur]  = TILE_RIVER;
                 g->z[cur]   = (int8_t)clampi(g->z[cur] - 2, -128, 127);
                 ++carved;
+            }
+            /* record a ford anchor every FORD_STEP cells along the path */
+            if (step > 0 && step % FORD_STEP == 0) {
+                if (nFord == capFord) {
+                    int nc2 = capFord ? capFord * 2 : 256;
+                    int *tmp = (int *)realloc(fordAnchors, (size_t)nc2 * sizeof(int));
+                    if (tmp) { fordAnchors = tmp; capFord = nc2; }
+                }
+                if (nFord < capFord) fordAnchors[nFord++] = cur;
             }
             /* find the lowest neighbor (8-dir) by routing height: this gives the
              * natural flow direction and detects pits. */
@@ -274,40 +288,66 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
             g->z[i]   = (int8_t)clampi(g->z[i] - 1, -128, 127);
         }
 
-    /* Fords: guarantee every river stays crossable so no area is landlocked by
-     * a river. A grid of ford lines (every FORD_SPACING tiles, both axes)
-     * converts the river cells it crosses back to a passable land bridge set
-     * level with the nearest bank. Any river spanning more than FORD_SPACING in
-     * x or y therefore has at least one crossing to each side. */
-    const int FORD_SPACING = 96;
-    const int FORD_WIDTH = 2;
-    long fords = 0;
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x) {
-            int i = x + y * W;
-            if (g->cat[i] != TCAT_RIVER) continue;
-            if ((x % FORD_SPACING) >= FORD_WIDTH && (y % FORD_SPACING) >= FORD_WIDTH)
-                continue;
-            /* bank height: highest adjacent walkable-land neighbour */
-            int bz = g->z[i] + 2; int found = 0;
+    /* Fords: a compact crossing at each anchor so no area is landlocked by a
+     * river, without long sandbars or bridges to nowhere. Each ford floods the
+     * connected river cells within a small radius back to passable land (so it
+     * spans the channel bank-to-bank and nothing more). Anchors within a few
+     * cells of the open sea are skipped, so there are no sandbars at river
+     * mouths. */
+    const int FORD_RADIUS = 3;
+    long fords = 0, fordsPlaced = 0;
+    int q[512], qd[512];
+    for (int a = 0; a < nFord; ++a) {
+        int start = fordAnchors[a];
+        if (g->cat[start] != TCAT_RIVER) continue;   /* already forded/merged */
+
+        /* skip anchors near open ocean (would make a sandbar at the mouth) */
+        int sx = start % W, sy = start / W, nearSea = 0;
+        for (int dy = -FORD_RADIUS - 1; dy <= FORD_RADIUS + 1 && !nearSea; ++dy)
+            for (int dx = -FORD_RADIUS - 1; dx <= FORD_RADIUS + 1; ++dx) {
+                int nx = sx + dx, ny = sy + dy;
+                if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                int c = g->cat[nx + ny * W];
+                if (c == TCAT_WATER_DEEP || c == TCAT_WATER_SHALLOW) { nearSea = 1; break; }
+            }
+        if (nearSea) continue;
+
+        int qh = 0, qt = 0;
+        q[qt] = start; qd[qt] = 0; qt++;
+        while (qh < qt) {
+            int c = q[qh]; int d = qd[qh]; qh++;
+            if (g->cat[c] != TCAT_RIVER) continue;
+            int cxc = c % W, cyc = c / W;
+            int bz = g->z[c] + 2; int found = 0;
             for (int dy = -1; dy <= 1; ++dy)
                 for (int dx = -1; dx <= 1; ++dx) {
                     if (!dx && !dy) continue;
-                    int nx = x + dx, ny = y + dy;
+                    int nx = cxc + dx, ny = cyc + dy;
                     if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
                     int ni = nx + ny * W;
                     if (!IS_WATER_CAT(g->cat[ni]) && g->cat[ni] != TCAT_MOUNTAIN) {
                         if (!found || g->z[ni] > bz) { bz = g->z[ni]; found = 1; }
                     }
                 }
-            g->cat[i] = TCAT_SAND;      /* ford = passable crossing */
-            g->id[i]  = tile_for_cat(TCAT_SAND);
-            g->z[i]   = (int8_t)clampi(bz, -128, 127);
+            g->cat[c] = TCAT_SAND;
+            g->id[c]  = tile_for_cat(TCAT_SAND);
+            g->z[c]   = (int8_t)clampi(bz, -128, 127);
             ++fords;
+            if (d < FORD_RADIUS) {
+                int nb[4] = { c - 1, c + 1, c - W, c + W };
+                for (int k = 0; k < 4; ++k) {
+                    int n = nb[k];
+                    if (n < 0 || n >= W * H) continue;
+                    if (g->cat[n] == TCAT_RIVER && qt < 512) { q[qt] = n; qd[qt] = d + 1; qt++; }
+                }
+            }
         }
+        ++fordsPlaced;
+    }
+    free(fordAnchors);
 
-    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld ford cells\n",
-            cap, carved, reached, fords);
+    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld fords (%ld cells)\n",
+            cap, carved, reached, fordsPlaced, fords);
     noise_layer_free(mnd);
     free(cs);
 }
