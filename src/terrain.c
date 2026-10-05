@@ -534,6 +534,26 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
         free(hf); terrain_free(g); return -1;
     }
 
+    /* Continent centers + base radius first, so the continent-shape elevation
+     * noise can be scaled to the continent size (coherent landmasses rather
+     * than circles or archipelagos). */
+    int ncen = cfg->continent_count;
+    vec2 centers[64];
+    double R = 1.0;
+    if (cfg->continents) {
+        if (ncen > 64) ncen = 64;
+        place_centers(cfg, centers, ncen);
+        double minpair = (double)(W < H ? W : H);
+        for (int a = 0; a < ncen; ++a)
+            for (int b = a + 1; b < ncen; ++b) {
+                double dx = centers[a].x - centers[b].x;
+                double dy = centers[a].y - centers[b].y;
+                double d = sqrt(dx * dx + dy * dy);
+                if (d < minpair) minpair = d;
+            }
+        R = 0.40 * minpair;
+    }
+
     noise_layer *elev = noise_layer_create(cfg->seed, NOISE_LAYER_ELEVATION,
                                             cfg->frequency, cfg->octaves);
     noise_layer *moist = noise_layer_create(cfg->seed, NOISE_LAYER_MOISTURE,
@@ -544,8 +564,11 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
         temp = noise_layer_create(cfg->seed, NOISE_LAYER_TEMPERATURE,
                                   cfg->frequency * 0.6, 3);
     if (cfg->continents)
+        /* Fractal shape noise scaled to the continent radius: ~1.3 wavelengths
+         * across R gives one coherent landmass per center with organic,
+         * fractal coasts (not a circle, not an archipelago). */
         cont = noise_layer_create(cfg->seed, NOISE_LAYER_CONTINENT,
-                                  cfg->continent_scale, cfg->octaves > 4 ? 4 : cfg->octaves);
+                                  1.0 / R, cfg->octaves);
     if (cfg->mountains) {
         /* Lower frequency + fewer octaves => a few broad, distinct ranges
          * rather than a fine web of ridges across the whole interior.
@@ -569,26 +592,6 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     const double inv_halfw = (W > 1) ? 2.0 / (double)(W - 1) : 0.0;
     const double inv_halfh = (H > 1) ? 2.0 / (double)(H - 1) : 0.0;
 
-    /* Continent centers + base radius (for the structured multi-continent mode). */
-    int ncen = cfg->continent_count;
-    vec2 centers[64];
-    double R = 1.0;
-    if (cfg->continents) {
-        if (ncen > 64) ncen = 64;
-        place_centers(cfg, centers, ncen);
-        /* Radius from the minimum pairwise distance so continents stay
-         * separated by ocean (even at max coastline warp). */
-        double minpair = (double)(W < H ? W : H);
-        for (int a = 0; a < ncen; ++a)
-            for (int b = a + 1; b < ncen; ++b) {
-                double dx = centers[a].x - centers[b].x;
-                double dy = centers[a].y - centers[b].y;
-                double d = sqrt(dx * dx + dy * dy);
-                if (d < minpair) minpair = d;
-            }
-        R = 0.40 * minpair;
-    }
-
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
             size_t i = (size_t)x + (size_t)y * (size_t)W;
@@ -597,18 +600,27 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
             double hbase;   /* [0,1] macro land height (interior high, coast low) */
 
             if (cfg->continents) {
-                /* Nearest continent center's warped radial field. */
-                double warp = noise_layer_sample(cont, x, y);   /* [-1,1] */
-                double cf = -1e30;
+                /* Land = elevation NOISE minus a radial falloff around the
+                 * nearest placed center (same idea as --continent, per center).
+                 * The fractal shape noise defines the coastline; the falloff
+                 * only pushes faraway areas to ocean and keeps continents
+                 * separated. A little fine detail roughens the edge further. */
+                double shape = noise_layer_sample(cont, x, y);     /* [-1,1] */
+                double dmin = 1e30;
                 for (int k = 0; k < ncen; ++k) {
                     double dx = (double)x - centers[k].x;
                     double dy = (double)y - centers[k].y;
                     double dist = sqrt(dx * dx + dy * dy);
-                    double reach = R * (1.0 + 0.28 * warp);
-                    double v = (reach - dist) / R;             /* >0 inside */
-                    if (v > cf) cf = v;
+                    if (dist < dmin) dmin = dist;
                 }
-                e = cf + 0.15 * e_detail;
+                double t = dmin / R - 0.40;         /* solid-ish core out to 0.40R */
+                if (t < 0.0) t = 0.0;
+                /* Gentle interior lift so each continent reads as one coherent
+                 * landmass (fewer interior seas), while the noise still shapes
+                 * the coastline organically. */
+                double core = 0.25 * (1.0 - dmin / R);
+                if (core < 0.0) core = 0.0;
+                e = (shape + 0.18 * e_detail + core) - 1.7 * pow(t, 2.0);
                 /* Ocean margin: force the outer ring of the map to sea so no
                  * continent runs off the edge and ends abruptly. */
                 double nxe = (double)x * inv_halfw - 1.0;
@@ -617,7 +629,11 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 double et = (em - 0.80) / (1.0 - 0.80);
                 if (et < 0.0) et = 0.0;
                 e -= 3.0 * et * et;
-                hbase = cf;
+                /* Smooth macro height (cone) for land height + river routing. */
+                double hc = 1.0 - dmin / R;
+                if (hc < 0.0) hc = 0.0;
+                if (hc > 1.0) hc = 1.0;
+                hbase = hc;
             } else if (cfg->continent) {
                 e = e_detail;
                 double nx = (double)x * inv_halfw - 1.0;
