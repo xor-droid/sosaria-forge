@@ -451,17 +451,18 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                     double mn = (m + 1.0) * 0.5;               /* -> [0,1] */
                     if (mn > cfg->mountain_level) {
                         double f = (mn - cfg->mountain_level) / (1.0 - cfg->mountain_level);
-                        if (!cfg->flat)
-                            z = clampi(z + (int)lround(f * (double)cfg->mountain_z), -128, 127);
+                        /* Mountains rise above the ground in both modes: from
+                         * flat_z in flat mode, or from the base height otherwise. */
+                        int base = cfg->flat ? cfg->flat_z : z;
+                        z = clampi(base + (int)lround(f * (double)cfg->mountain_z), -128, 127);
                         route += f;           /* ranges are river sources/high ground */
                         isMountain = 1;
                     }
                 }
 
-                /* Flat mode: all land sits at one level (ground level everywhere).
-                 * Terrain shapes (coasts, mountains, rivers) remain, only the
-                 * height is leveled. */
-                if (cfg->flat)
+                /* Flat mode: non-mountain land sits at one level, while mountain
+                 * ranges keep their elevation (set above). */
+                if (cfg->flat && !isMountain)
                     z = cfg->flat_z;
 
                 height = (float)route;
