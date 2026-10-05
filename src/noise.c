@@ -47,6 +47,14 @@ noise_layer *noise_layer_create(uint64_t master, uint32_t salt,
     return l;
 }
 
+noise_layer *noise_layer_create_ridged(uint64_t master, uint32_t salt,
+                                        double frequency, int octaves) {
+    noise_layer *l = noise_layer_create(master, salt, frequency, octaves);
+    if (l)
+        l->state.fractal_type = FNL_FRACTAL_RIDGED;
+    return l;
+}
+
 void noise_layer_free(noise_layer *l) {
     free(l);
 }

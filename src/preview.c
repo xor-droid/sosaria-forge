@@ -16,6 +16,8 @@ static const rgb CAT_COLOR[TCAT_COUNT] = {
     [TCAT_GRASS]         = {  70, 150,  70 },
     [TCAT_FOREST]        = {  40, 100,  40 },
     [TCAT_HILL]          = { 120, 100,  80 },
+    [TCAT_MOUNTAIN]      = { 115, 110, 105 },
+    [TCAT_RIVER]         = {  70, 130, 210 },
 };
 
 static unsigned char clampu8(int v) {
@@ -36,8 +38,8 @@ int preview_write_png(const terrain_grid *g, const char *path) {
         if (cat < 0 || cat >= TCAT_COUNT)
             cat = TCAT_GRASS;
         rgb c = CAT_COLOR[cat];
-        /* Shade land by height for relief; leave water flat. */
-        if (cat != TCAT_WATER_DEEP && cat != TCAT_WATER_SHALLOW) {
+        /* Shade land by height for relief; leave water/rivers flat. */
+        if (cat != TCAT_WATER_DEEP && cat != TCAT_WATER_SHALLOW && cat != TCAT_RIVER) {
             int shade = g->z[i]; /* -128..127, land is >= 0 here */
             img[i * 3 + 0] = clampu8((int)c.r + shade);
             img[i * 3 + 1] = clampu8((int)c.g + shade);

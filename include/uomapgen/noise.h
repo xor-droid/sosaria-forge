@@ -35,6 +35,10 @@ typedef struct noise_layer noise_layer;
  * Returns NULL on allocation failure. Free with noise_layer_free(). */
 noise_layer *noise_layer_create(uint64_t master, uint32_t salt,
                                 double frequency, int octaves);
+
+/* Create a RIDGED OpenSimplex2 layer (sharp ridge lines -> mountain ranges). */
+noise_layer *noise_layer_create_ridged(uint64_t master, uint32_t salt,
+                                        double frequency, int octaves);
 void noise_layer_free(noise_layer *l);
 
 /* Sample at tile (x,y). Returns a value in roughly [-1, 1]. */

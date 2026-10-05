@@ -20,6 +20,8 @@ enum {
     TCAT_GRASS,
     TCAT_FOREST,
     TCAT_HILL,
+    TCAT_MOUNTAIN,
+    TCAT_RIVER,
     TCAT_COUNT
 };
 

@@ -29,7 +29,13 @@ enum {
     OPT_CONT_RADIUS = 1000,
     OPT_CONT_STRENGTH,
     OPT_CONT_POWER,
-    OPT_CONT_SCALE
+    OPT_CONT_SCALE,
+    OPT_CONT_COUNT,
+    OPT_MOUNTAINS,
+    OPT_MTN_LEVEL,
+    OPT_MTN_Z,
+    OPT_RIVERS,
+    OPT_RIVER_DENSITY
 };
 
 static void print_version(void) {
@@ -64,9 +70,14 @@ static void print_help(const char *argv0) {
 "  --continent-radius <f>    Solid-land core radius, [0,1) (default 0.55; implies --continent).\n"
 "  --continent-strength <f>  How hard edges fall to ocean (default 2.0; implies --continent).\n"
 "  --continent-power <f>     Falloff curvature (default 2.0; implies --continent).\n"
-"  --continents          Multiple continents of varying size (not one landmass).\n"
-"  --continent-scale <f>     Continent-mask frequency; smaller = bigger landmasses\n"
-"                            (default 0.00045; implies --continents).\n"
+"  --continents          Multiple continents (placed centers), ocean between them.\n"
+"  --continent-count <n>     Number of continents (default 3; implies --continents).\n"
+"  --continent-scale <f>     Coastline-warp frequency (default 0.00045).\n"
+"  --mountains           Add ridged mountain ranges (impassable rock peaks).\n"
+"  --mountain-level <f>      Ridge threshold [0,1); higher = fewer/sparser ranges (default 0.70).\n"
+"  --mountain-z <int>        Extra z at peaks, 0..127 (default 70).\n"
+"  --rivers              Carve downhill rivers from high ground to the sea.\n"
+"  --river-density <n>       Number of river sources (default: auto from map size).\n"
 "  --tiledata <path>     tiledata.mul used to sanity-check tile flags\n"
 "                        (default ./ref/UONewDawn/tiledata.mul; optional).\n"
 "  --preview <file.png>  Also render a top-down preview image.\n"
@@ -136,6 +147,12 @@ int main(int argc, char **argv) {
         { "continent-power",    required_argument, 0, OPT_CONT_POWER },
         { "continents",  no_argument,       0, 'A' },
         { "continent-scale",    required_argument, 0, OPT_CONT_SCALE },
+        { "continent-count",    required_argument, 0, OPT_CONT_COUNT },
+        { "mountains",   no_argument,       0, OPT_MOUNTAINS },
+        { "mountain-level",     required_argument, 0, OPT_MTN_LEVEL },
+        { "mountain-z",         required_argument, 0, OPT_MTN_Z },
+        { "rivers",      no_argument,       0, OPT_RIVERS },
+        { "river-density",      required_argument, 0, OPT_RIVER_DENSITY },
         { "tiledata",    required_argument, 0, 'T' },
         { "preview",     required_argument, 0, 'P' },
         { "emit-mapdef", no_argument,       0, 'M' },
@@ -168,6 +185,12 @@ int main(int argc, char **argv) {
             case OPT_CONT_POWER:    cfg.continent = 1; cfg.continent_power = strtod(optarg, NULL); break;
             case 'A': cfg.continents = 1; break;
             case OPT_CONT_SCALE:    cfg.continents = 1; cfg.continent_scale = strtod(optarg, NULL); break;
+            case OPT_CONT_COUNT:    cfg.continents = 1; cfg.continent_count = (int)strtol(optarg, NULL, 0); break;
+            case OPT_MOUNTAINS:     cfg.mountains = 1; break;
+            case OPT_MTN_LEVEL:     cfg.mountains = 1; cfg.mountain_level = strtod(optarg, NULL); break;
+            case OPT_MTN_Z:         cfg.mountains = 1; cfg.mountain_z = (int)strtol(optarg, NULL, 0); break;
+            case OPT_RIVERS:        cfg.rivers = 1; break;
+            case OPT_RIVER_DENSITY: cfg.rivers = 1; cfg.river_density = (int)strtol(optarg, NULL, 0); break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;
             case 'P': snprintf(cfg.preview_path, sizeof(cfg.preview_path), "%s", optarg); break;
             case 'M': cfg.emit_mapdef = 1; break;

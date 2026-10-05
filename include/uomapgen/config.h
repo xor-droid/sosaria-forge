@@ -30,8 +30,14 @@ typedef struct {
     double   continent_radius;   /* [0,1): solid-land core radius before falloff */
     double   continent_strength; /* how hard edges are pushed to ocean (>0) */
     double   continent_power;    /* falloff curvature (>0) */
-    int      continents;    /* bool: multiple continents via low-freq mask noise */
-    double   continent_scale;    /* frequency of the continent mask (smaller = bigger) */
+    int      continents;    /* bool: multiple continents via placed centers */
+    int      continent_count;    /* number of continents when continents=1 */
+    double   continent_scale;    /* frequency of the coastline-warp noise */
+    int      mountains;     /* bool: add ridged mountain ranges */
+    double   mountain_level;     /* ridge threshold in [0,1]; higher = less rock */
+    int      mountain_z;         /* extra z added at mountain peaks */
+    int      rivers;        /* bool: carve downhill rivers from high ground */
+    int      river_density;      /* source count (0 = auto from map size) */
     int      emit_mapdef;   /* bool: also write map-definitions.snippet.json */
     int      terrain_only;  /* bool: write only mapN.mul (skip statics) */
     char     out_dir[UOMG_PATH_MAX];

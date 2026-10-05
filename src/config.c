@@ -24,7 +24,13 @@ void config_defaults(mapgen_config *cfg) {
     cfg->continent_strength = 2.0;
     cfg->continent_power    = 2.0;
     cfg->continents         = 0;
+    cfg->continent_count    = 3;
     cfg->continent_scale    = 0.00045;
+    cfg->mountains          = 0;
+    cfg->mountain_level     = 0.70;
+    cfg->mountain_z         = 70;
+    cfg->rivers             = 0;
+    cfg->river_density      = 0;
     cfg->emit_mapdef = 0;
     cfg->terrain_only = 0;
     snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", "./out");
@@ -88,8 +94,20 @@ int config_set_kv(mapgen_config *cfg, const char *key_in, const char *val) {
         cfg->continent_power = strtod(val, NULL);
     } else if (!strcmp(key, "continents")) {
         if (parse_bool(val, &cfg->continents) != 0) return -1;
+    } else if (!strcmp(key, "continent_count")) {
+        cfg->continent_count = (int)strtol(val, NULL, 0);
     } else if (!strcmp(key, "continent_scale")) {
         cfg->continent_scale = strtod(val, NULL);
+    } else if (!strcmp(key, "mountains")) {
+        if (parse_bool(val, &cfg->mountains) != 0) return -1;
+    } else if (!strcmp(key, "mountain_level")) {
+        cfg->mountain_level = strtod(val, NULL);
+    } else if (!strcmp(key, "mountain_z")) {
+        cfg->mountain_z = (int)strtol(val, NULL, 0);
+    } else if (!strcmp(key, "rivers")) {
+        if (parse_bool(val, &cfg->rivers) != 0) return -1;
+    } else if (!strcmp(key, "river_density")) {
+        cfg->river_density = (int)strtol(val, NULL, 0);
     } else if (!strcmp(key, "out")) {
         snprintf(cfg->out_dir, sizeof(cfg->out_dir), "%s", val);
     } else if (!strcmp(key, "tiledata")) {
@@ -210,6 +228,18 @@ int config_validate(const mapgen_config *cfg) {
     }
     if (cfg->continents && cfg->continent_scale <= 0.0) {
         fprintf(stderr, "error: continent-scale (%g) must be > 0\n", cfg->continent_scale); ok = 0;
+    }
+    if (cfg->continents && (cfg->continent_count < 1 || cfg->continent_count > 64)) {
+        fprintf(stderr, "error: continent-count (%d) must be in 1..64\n", cfg->continent_count); ok = 0;
+    }
+    if (cfg->mountains && (cfg->mountain_level < 0.0 || cfg->mountain_level >= 1.0)) {
+        fprintf(stderr, "error: mountain-level (%g) must be in [0,1)\n", cfg->mountain_level); ok = 0;
+    }
+    if (cfg->mountains && (cfg->mountain_z < 0 || cfg->mountain_z > 127)) {
+        fprintf(stderr, "error: mountain-z (%d) must be in 0..127\n", cfg->mountain_z); ok = 0;
+    }
+    if (cfg->rivers && cfg->river_density < 0) {
+        fprintf(stderr, "error: river-density (%d) must be >= 0\n", cfg->river_density); ok = 0;
     }
     if (cfg->continent) {
         if (cfg->continent_radius < 0.0 || cfg->continent_radius >= 1.0) {
