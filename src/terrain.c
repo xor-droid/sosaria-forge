@@ -88,6 +88,19 @@ static void validate_palette(const tiledata_land *td) {
 
 typedef struct { double x, y; } vec2;
 
+/* True if any 8-neighbour of (x,y) is a mountain cell. */
+static int adjacent_to_mountain(const terrain_grid *g, int x, int y) {
+    const int W = g->width, H = g->height;
+    for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (!dx && !dy) continue;
+            int nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            if (g->cat[nx + ny * W] == TCAT_MOUNTAIN) return 1;
+        }
+    return 0;
+}
+
 /* Deterministically place continent_count centers on an ellipse inscribed in
  * the map (a triangle for n=3), seed-rotated. This spreads them in 2D so they
  * stay well separated with ocean between, rather than merging along one axis.
@@ -97,7 +110,7 @@ static void place_centers(const mapgen_config *cfg, vec2 *c, int n) {
     double phase = (double)(noise_splitmix64(&s) >> 11) / 9007199254740992.0 * 6.2831853;
     double cx = cfg->width * 0.5, cy = cfg->height * 0.5;
     if (n == 1) { c[0].x = cx; c[0].y = cy; return; }
-    double a = cfg->width * 0.30, b = cfg->height * 0.32;
+    double a = cfg->width * 0.26, b = cfg->height * 0.27;
     for (int k = 0; k < n; ++k) {
         double ang = phase + k * (6.2831853 / (double)n);
         c[k].x = cx + a * cos(ang);
@@ -124,18 +137,26 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
     int nc = 0;
     for (int cy = 0; cy < gy; ++cy)
         for (int cx = 0; cx < gx; ++cx) {
-            float best = -1e30f; int bi = -1; int haveMtn = 0;
+            /* Rivers never originate in or run through mountains. Prefer a
+             * "spring" at a mountain's foot (highest non-mountain cell that
+             * touches a range); otherwise fall back to the highest high-ground
+             * cell in this grid cell. */
+            float best = -1e30f;  int bi = -1;
+            float bestF = -1e30f; int biF = -1;
             for (int y = cy * S; y < (cy + 1) * S && y < H; ++y)
                 for (int x = cx * S; x < (cx + 1) * S && x < W; ++x) {
                     int i = x + y * W;
-                    if (IS_WATER_CAT(g->cat[i])) continue;
-                    int isM = (g->cat[i] == TCAT_MOUNTAIN);
-                    if (isM && !haveMtn) { haveMtn = 1; best = -1e30f; bi = -1; }
-                    if (haveMtn && !isM) continue;   /* prefer mountains */
+                    if (IS_WATER_CAT(g->cat[i]) || g->cat[i] == TCAT_MOUNTAIN)
+                        continue;
                     if (hf[i] > best) { best = hf[i]; bi = i; }
+                    if (adjacent_to_mountain(g, x, y) && hf[i] > bestF) {
+                        bestF = hf[i]; biF = i;
+                    }
                 }
-            if (bi >= 0 && (haveMtn || best > 0.60f))
-                cs[nc++] = (cand){ best, bi };
+            if (biF >= 0)
+                cs[nc++] = (cand){ bestF, biF };      /* mountain-fed spring */
+            else if (bi >= 0 && best > 0.55f)
+                cs[nc++] = (cand){ best, bi };         /* high-ground source */
         }
 
     /* Sort candidates by height descending (simple insertion on the modest
@@ -175,6 +196,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                     int nx = cx + dx, ny = cy + dy;
                     if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
                     int ni = nx + ny * W;
+                    if (g->cat[ni] == TCAT_MOUNTAIN) continue; /* never flow into a range */
                     if (hf[ni] < bh) { bh = hf[ni]; best = ni; }
                 }
             if (best < 0) break;
@@ -192,7 +214,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                 int wx = cx + px * sgn, wy = cy + py * sgn;
                 if (wx < 0 || wy < 0 || wx >= W || wy >= H) continue;
                 int wi = wx + wy * W;
-                if (!IS_WATER_CAT(g->cat[wi])) {
+                if (!IS_WATER_CAT(g->cat[wi]) && g->cat[wi] != TCAT_MOUNTAIN) {
                     g->cat[wi] = TCAT_RIVER;
                     g->id[wi]  = TILE_RIVER;
                     g->z[wi]   = (int8_t)clampi(g->z[wi] - 2, -128, 127);
@@ -211,7 +233,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             int i = x + y * W;
-            if (IS_WATER_CAT(g->cat[i])) continue;
+            if (IS_WATER_CAT(g->cat[i]) || g->cat[i] == TCAT_MOUNTAIN) continue;
             int near = 0;
             if (x > 0     && g->cat[i - 1] == TCAT_RIVER) near = 1;
             else if (x < W-1 && g->cat[i + 1] == TCAT_RIVER) near = 1;
@@ -226,8 +248,40 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
             g->z[i]   = (int8_t)clampi(g->z[i] - 1, -128, 127);
         }
 
-    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea\n",
-            cap, carved, reached);
+    /* Fords: guarantee every river stays crossable so no area is landlocked by
+     * a river. A grid of ford lines (every FORD_SPACING tiles, both axes)
+     * converts the river cells it crosses back to a passable land bridge set
+     * level with the nearest bank. Any river spanning more than FORD_SPACING in
+     * x or y therefore has at least one crossing to each side. */
+    const int FORD_SPACING = 96;
+    const int FORD_WIDTH = 2;
+    long fords = 0;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            int i = x + y * W;
+            if (g->cat[i] != TCAT_RIVER) continue;
+            if ((x % FORD_SPACING) >= FORD_WIDTH && (y % FORD_SPACING) >= FORD_WIDTH)
+                continue;
+            /* bank height: highest adjacent walkable-land neighbour */
+            int bz = g->z[i] + 2; int found = 0;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (!dx && !dy) continue;
+                    int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                    int ni = nx + ny * W;
+                    if (!IS_WATER_CAT(g->cat[ni]) && g->cat[ni] != TCAT_MOUNTAIN) {
+                        if (!found || g->z[ni] > bz) { bz = g->z[ni]; found = 1; }
+                    }
+                }
+            g->cat[i] = TCAT_SAND;      /* ford = passable crossing */
+            g->id[i]  = tile_for_cat(TCAT_SAND);
+            g->z[i]   = (int8_t)clampi(bz, -128, 127);
+            ++fords;
+        }
+
+    fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld ford cells\n",
+            cap, carved, reached, fords);
     free(cs);
 }
 
@@ -317,6 +371,14 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                     if (v > cf) cf = v;
                 }
                 e = cf + 0.15 * e_detail;
+                /* Ocean margin: force the outer ring of the map to sea so no
+                 * continent runs off the edge and ends abruptly. */
+                double nxe = (double)x * inv_halfw - 1.0;
+                double nye = (double)y * inv_halfh - 1.0;
+                double em = fabs(nxe) > fabs(nye) ? fabs(nxe) : fabs(nye);
+                double et = (em - 0.80) / (1.0 - 0.80);
+                if (et < 0.0) et = 0.0;
+                e -= 3.0 * et * et;
                 hbase = cf;
             } else if (cfg->continent) {
                 e = e_detail;
