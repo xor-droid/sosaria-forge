@@ -177,7 +177,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
         cs[b + 1] = key;
     }
 
-    int cap = cfg->river_density > 0 ? cfg->river_density : (W + H) / 160;
+    int cap = cfg->river_density > 0 ? cfg->river_density : (W + H) / 400;
     if (cap > nc) cap = nc;
 
     long carved = 0, reached = 0;
