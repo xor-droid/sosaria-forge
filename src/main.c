@@ -24,6 +24,13 @@
 #define UOMG_VERSION "0.1.0"
 #endif
 
+/* Long-only option codes (no short equivalents). */
+enum {
+    OPT_CONT_RADIUS = 1000,
+    OPT_CONT_STRENGTH,
+    OPT_CONT_POWER
+};
+
 static void print_version(void) {
     printf("uomapgen %s\n", UOMG_VERSION);
 }
@@ -52,6 +59,10 @@ static void print_help(const char *argv0) {
 "  --max-slope <int>     Max z step between adjacent land tiles (default 4).\n"
 "  --land-z-max <int>    Highest land z from elevation, 0..127 (default 45).\n"
 "  --water-z <int>       Flat z for water cells (default -5).\n"
+"  --continent           Radial falloff: one large central landmass ringed by ocean.\n"
+"  --continent-radius <f>    Solid-land core radius, [0,1) (default 0.55; implies --continent).\n"
+"  --continent-strength <f>  How hard edges fall to ocean (default 2.0; implies --continent).\n"
+"  --continent-power <f>     Falloff curvature (default 2.0; implies --continent).\n"
 "  --tiledata <path>     tiledata.mul used to sanity-check tile flags\n"
 "                        (default ./ref/UONewDawn/tiledata.mul; optional).\n"
 "  --preview <file.png>  Also render a top-down preview image.\n"
@@ -115,6 +126,10 @@ int main(int argc, char **argv) {
         { "max-slope",   required_argument, 0, 'S' },
         { "land-z-max",  required_argument, 0, 'Z' },
         { "water-z",     required_argument, 0, 'w' },
+        { "continent",   no_argument,       0, 'C' },
+        { "continent-radius",   required_argument, 0, OPT_CONT_RADIUS },
+        { "continent-strength", required_argument, 0, OPT_CONT_STRENGTH },
+        { "continent-power",    required_argument, 0, OPT_CONT_POWER },
         { "tiledata",    required_argument, 0, 'T' },
         { "preview",     required_argument, 0, 'P' },
         { "emit-mapdef", no_argument,       0, 'M' },
@@ -123,7 +138,7 @@ int main(int argc, char **argv) {
         { "version",     no_argument,       0, 'v' },
         { 0, 0, 0, 0 }
     };
-    const char *optstr = "s:c:m:W:H:p:o:L:f:O:S:Z:w:T:P:Mthv";
+    const char *optstr = "s:c:m:W:H:p:o:L:f:O:S:Z:w:CT:P:Mthv";
 
     int c, idx;
     while ((c = getopt_long(argc, argv, optstr, longopts, &idx)) != -1) {
@@ -141,6 +156,10 @@ int main(int argc, char **argv) {
             case 'S': cfg.max_slope = (int)strtol(optarg, NULL, 0); break;
             case 'Z': cfg.land_z_max = (int)strtol(optarg, NULL, 0); break;
             case 'w': cfg.water_z = (int)strtol(optarg, NULL, 0); break;
+            case 'C': cfg.continent = 1; break;
+            case OPT_CONT_RADIUS:   cfg.continent = 1; cfg.continent_radius = strtod(optarg, NULL); break;
+            case OPT_CONT_STRENGTH: cfg.continent = 1; cfg.continent_strength = strtod(optarg, NULL); break;
+            case OPT_CONT_POWER:    cfg.continent = 1; cfg.continent_power = strtod(optarg, NULL); break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;
             case 'P': snprintf(cfg.preview_path, sizeof(cfg.preview_path), "%s", optarg); break;
             case 'M': cfg.emit_mapdef = 1; break;

@@ -112,12 +112,33 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     const double sea = cfg->sea_level;
     const int land_zmax = cfg->land_z_max;
 
+    /* Normalizer so radial distance is 0 at the center and 1.0 at the nearest
+     * edge midpoint (continent fills the inscribed area; corners are ocean). */
+    const double inv_halfw = (W > 1) ? 2.0 / (double)(W - 1) : 0.0;
+    const double inv_halfh = (H > 1) ? 2.0 / (double)(H - 1) : 0.0;
+
     for (int y = 0; y < H; ++y) {
         for (int x = 0; x < W; ++x) {
             size_t i = (size_t)x + (size_t)y * (size_t)W;
             double e = noise_layer_sample(elev, x, y);  /* ~[-1,1] */
             int cat;
             int z;
+
+            /* Central-continent mask: a solid-land core out to continent_radius,
+             * then rising ocean pressure toward the edges, so a single landmass
+             * sits in the middle ringed by ocean on all sides. d is clamped
+             * Euclidean distance (1.0 at the nearest edge), so every edge drowns,
+             * not just the corners. */
+            if (cfg->continent) {
+                double nx = (double)x * inv_halfw - 1.0;  /* [-1,1] */
+                double ny = (double)y * inv_halfh - 1.0;  /* [-1,1] */
+                double d = sqrt(nx * nx + ny * ny);
+                if (d > 1.0) d = 1.0;
+                double r0 = cfg->continent_radius;
+                double t = (d - r0) / (1.0 - r0);         /* 0 at core edge, 1 at map edge */
+                if (t < 0.0) t = 0.0;
+                e -= cfg->continent_strength * pow(t, cfg->continent_power);
+            }
 
             if (e < sea) {
                 /* Water: deep vs shallow band near the coast. */
