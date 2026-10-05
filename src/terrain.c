@@ -130,10 +130,15 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
     const int S = 96;                 /* coarse source-grid cell size */
     const int gx = (W + S - 1) / S, gy = (H + S - 1) / S;
 
+    /* Meander steering: a smooth noise field rotates each downhill step so the
+     * river wanders laterally instead of running straight down the slope. */
+    noise_layer *mnd = noise_layer_create(cfg->seed, NOISE_LAYER_MEANDER, 0.012, 2);
+    const double MEANDER_MAX = 1.15;  /* max angular deflection (radians) */
+
     /* Collect one highest candidate per coarse cell (mountain if available). */
     typedef struct { float h; int idx; } cand;
     cand *cs = (cand *)malloc((size_t)gx * gy * sizeof(cand));
-    if (!cs) return;
+    if (!cs) { noise_layer_free(mnd); return; }
     int nc = 0;
     for (int cy = 0; cy < gy; ++cy)
         for (int cx = 0; cx < gx; ++cx) {
@@ -188,7 +193,8 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                 g->z[cur]   = (int8_t)clampi(g->z[cur] - 2, -128, 127);
                 ++carved;
             }
-            /* find the lowest neighbor (8-dir) by routing height */
+            /* find the lowest neighbor (8-dir) by routing height: this gives the
+             * natural flow direction and detects pits. */
             int best = -1; float bh = 1e30f;
             for (int dy = -1; dy <= 1; ++dy)
                 for (int dx = -1; dx <= 1; ++dx) {
@@ -200,14 +206,34 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                     if (hf[ni] < bh) { bh = hf[ni]; best = ni; }
                 }
             if (best < 0) break;
-            /* Flow to the lowest neighbor. If it is not strictly lower, allow a
-             * small uphill step to escape shallow pits from coastline warp;
-             * otherwise the river ends (forms a lake). Hitting an existing
-             * river merges the networks. */
+            /* If the lowest reachable neighbor is not lower (beyond a small
+             * tolerance for coastline-warp dips), the river ends in a lake. */
             if (bh > hf[cur] + 0.01f) break;
-            if (g->cat[best] == TCAT_RIVER) break;
+
+            /* Meander: rotate the steepest-descent direction by a smooth
+             * noise-driven angle, then flow to the downhill neighbour best
+             * aligned with that heading. Every step still descends (within
+             * tolerance), so rivers keep reaching the sea while winding. */
+            double baseAng = atan2((double)(best / W - cy), (double)(best % W - cx));
+            double ang = baseAng + MEANDER_MAX * noise_layer_sample(mnd, cx, cy);
+            double dxw = cos(ang), dyw = sin(ang);
+            int chosen = best; double bestScore = -1e30;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) {
+                    if (!dx && !dy) continue;
+                    int nx2 = cx + dx, ny2 = cy + dy;
+                    if (nx2 < 0 || ny2 < 0 || nx2 >= W || ny2 >= H) continue;
+                    int ni = nx2 + ny2 * W;
+                    if (g->cat[ni] == TCAT_MOUNTAIN) continue;
+                    if (hf[ni] > hf[cur] + 0.01f) continue;   /* keep descending */
+                    double len = (dx && dy) ? 0.70710678 : 1.0;
+                    double score = ((double)dx * dxw + (double)dy * dyw) * len;
+                    if (score > bestScore) { bestScore = score; chosen = ni; }
+                }
+
+            if (g->cat[chosen] == TCAT_RIVER) break;  /* merged into another river */
             /* widen: mark the two cells perpendicular to flow as river banks */
-            int nx = best % W, ny = best / W;
+            int nx = chosen % W, ny = chosen / W;
             int ddx = nx - cx, ddy = ny - cy;
             int px = -ddy, py = ddx;       /* perpendicular */
             for (int sgn = -1; sgn <= 1; sgn += 2) {
@@ -221,7 +247,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
                 }
             }
             prevx = cx; prevy = cy; (void)prevx; (void)prevy;
-            cur = best;
+            cur = chosen;
         }
         if (got_sea) ++reached;
     }
@@ -282,6 +308,7 @@ static void carve_rivers(terrain_grid *g, const mapgen_config *cfg,
 
     fprintf(stderr, "rivers: %d sources, %ld cells carved, %ld reached the sea, %ld ford cells\n",
             cap, carved, reached, fords);
+    noise_layer_free(mnd);
     free(cs);
 }
 
