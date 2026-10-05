@@ -255,12 +255,15 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     if (cfg->continents)
         cont = noise_layer_create(cfg->seed, NOISE_LAYER_CONTINENT,
                                   cfg->continent_scale, cfg->octaves > 4 ? 4 : cfg->octaves);
-    if (cfg->mountains)
+    if (cfg->mountains) {
         /* Lower frequency + fewer octaves => a few broad, distinct ranges
-         * rather than a fine web of ridges across the whole interior. */
-        mtn = noise_layer_create_ridged(cfg->seed, NOISE_LAYER_DETAIL,
-                                        cfg->frequency * 0.5,
+         * rather than a fine web of ridges across the whole interior.
+         * --mountain-scale overrides the frequency (smaller = bigger ranges). */
+        double mfreq = cfg->mountain_scale > 0.0 ? cfg->mountain_scale
+                                                 : cfg->frequency * 0.5;
+        mtn = noise_layer_create_ridged(cfg->seed, NOISE_LAYER_DETAIL, mfreq,
                                         cfg->octaves > 4 ? 4 : cfg->octaves);
+    }
     if (!elev || !moist || (cfg->continents && !cont) || (cfg->mountains && !mtn)) {
         noise_layer_free(elev); noise_layer_free(moist);
         noise_layer_free(cont); noise_layer_free(mtn);
@@ -359,11 +362,19 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                     double mn = (m + 1.0) * 0.5;               /* -> [0,1] */
                     if (mn > cfg->mountain_level) {
                         double f = (mn - cfg->mountain_level) / (1.0 - cfg->mountain_level);
-                        z = clampi(z + (int)lround(f * (double)cfg->mountain_z), -128, 127);
+                        if (!cfg->flat)
+                            z = clampi(z + (int)lround(f * (double)cfg->mountain_z), -128, 127);
                         route += f;           /* ranges are river sources/high ground */
                         isMountain = 1;
                     }
                 }
+
+                /* Flat mode: all land sits at one level (ground level everywhere).
+                 * Terrain shapes (coasts, mountains, rivers) remain, only the
+                 * height is leveled. */
+                if (cfg->flat)
+                    z = cfg->flat_z;
+
                 height = (float)route;
 
                 if (isMountain) {
@@ -388,7 +399,10 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     if (cfg->rivers)
         carve_rivers(g, cfg, hf);
 
-    limit_slope(g, cfg);
+    /* Flat mode is already level; slope-limiting would only pull coastal land
+     * down toward the ocean, so skip it. */
+    if (!cfg->flat)
+        limit_slope(g, cfg);
 
     noise_layer_free(elev); noise_layer_free(moist);
     noise_layer_free(cont); noise_layer_free(mtn);

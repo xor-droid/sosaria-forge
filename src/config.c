@@ -26,9 +26,12 @@ void config_defaults(mapgen_config *cfg) {
     cfg->continents         = 0;
     cfg->continent_count    = 3;
     cfg->continent_scale    = 0.00045;
+    cfg->flat               = 0;
+    cfg->flat_z             = 0;
     cfg->mountains          = 0;
     cfg->mountain_level     = 0.70;
     cfg->mountain_z         = 70;
+    cfg->mountain_scale     = 0.0;   /* 0 => auto (frequency * 0.5) */
     cfg->rivers             = 0;
     cfg->river_density      = 0;
     cfg->emit_mapdef = 0;
@@ -98,12 +101,18 @@ int config_set_kv(mapgen_config *cfg, const char *key_in, const char *val) {
         cfg->continent_count = (int)strtol(val, NULL, 0);
     } else if (!strcmp(key, "continent_scale")) {
         cfg->continent_scale = strtod(val, NULL);
+    } else if (!strcmp(key, "flat")) {
+        if (parse_bool(val, &cfg->flat) != 0) return -1;
+    } else if (!strcmp(key, "flat_z")) {
+        cfg->flat_z = (int)strtol(val, NULL, 0);
     } else if (!strcmp(key, "mountains")) {
         if (parse_bool(val, &cfg->mountains) != 0) return -1;
     } else if (!strcmp(key, "mountain_level")) {
         cfg->mountain_level = strtod(val, NULL);
     } else if (!strcmp(key, "mountain_z")) {
         cfg->mountain_z = (int)strtol(val, NULL, 0);
+    } else if (!strcmp(key, "mountain_scale")) {
+        cfg->mountain_scale = strtod(val, NULL);
     } else if (!strcmp(key, "rivers")) {
         if (parse_bool(val, &cfg->rivers) != 0) return -1;
     } else if (!strcmp(key, "river_density")) {
@@ -237,6 +246,12 @@ int config_validate(const mapgen_config *cfg) {
     }
     if (cfg->mountains && (cfg->mountain_z < 0 || cfg->mountain_z > 127)) {
         fprintf(stderr, "error: mountain-z (%d) must be in 0..127\n", cfg->mountain_z); ok = 0;
+    }
+    if (cfg->mountains && cfg->mountain_scale < 0.0) {
+        fprintf(stderr, "error: mountain-scale (%g) must be >= 0\n", cfg->mountain_scale); ok = 0;
+    }
+    if (cfg->flat && (cfg->flat_z < -128 || cfg->flat_z > 127)) {
+        fprintf(stderr, "error: flat-z (%d) must be in -128..127\n", cfg->flat_z); ok = 0;
     }
     if (cfg->rivers && cfg->river_density < 0) {
         fprintf(stderr, "error: river-density (%d) must be >= 0\n", cfg->river_density); ok = 0;

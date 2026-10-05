@@ -34,6 +34,9 @@ enum {
     OPT_MOUNTAINS,
     OPT_MTN_LEVEL,
     OPT_MTN_Z,
+    OPT_MTN_SCALE,
+    OPT_FLAT,
+    OPT_FLAT_Z,
     OPT_RIVERS,
     OPT_RIVER_DENSITY
 };
@@ -73,9 +76,13 @@ static void print_help(const char *argv0) {
 "  --continents          Multiple continents (placed centers), ocean between them.\n"
 "  --continent-count <n>     Number of continents (default 3; implies --continents).\n"
 "  --continent-scale <f>     Coastline-warp frequency (default 0.00045).\n"
+"  --flat                Level ground everywhere: all land at one z (keeps coasts/rivers).\n"
+"  --flat-z <int>            The z for all land in --flat mode (default 0; implies --flat).\n"
 "  --mountains           Add ridged mountain ranges (impassable rock peaks).\n"
 "  --mountain-level <f>      Ridge threshold [0,1); higher = fewer/sparser ranges (default 0.70).\n"
 "  --mountain-z <int>        Extra z at peaks, 0..127 (default 70).\n"
+"  --mountain-scale <f>      Ridge frequency; smaller = bigger/broader ranges\n"
+"                            (default: auto = frequency*0.5).\n"
 "  --rivers              Carve downhill rivers from high ground to the sea.\n"
 "  --river-density <n>       Number of river sources (default: auto from map size).\n"
 "  --tiledata <path>     tiledata.mul used to sanity-check tile flags\n"
@@ -151,6 +158,9 @@ int main(int argc, char **argv) {
         { "mountains",   no_argument,       0, OPT_MOUNTAINS },
         { "mountain-level",     required_argument, 0, OPT_MTN_LEVEL },
         { "mountain-z",         required_argument, 0, OPT_MTN_Z },
+        { "mountain-scale",     required_argument, 0, OPT_MTN_SCALE },
+        { "flat",        no_argument,       0, OPT_FLAT },
+        { "flat-z",      required_argument, 0, OPT_FLAT_Z },
         { "rivers",      no_argument,       0, OPT_RIVERS },
         { "river-density",      required_argument, 0, OPT_RIVER_DENSITY },
         { "tiledata",    required_argument, 0, 'T' },
@@ -189,6 +199,9 @@ int main(int argc, char **argv) {
             case OPT_MOUNTAINS:     cfg.mountains = 1; break;
             case OPT_MTN_LEVEL:     cfg.mountains = 1; cfg.mountain_level = strtod(optarg, NULL); break;
             case OPT_MTN_Z:         cfg.mountains = 1; cfg.mountain_z = (int)strtol(optarg, NULL, 0); break;
+            case OPT_MTN_SCALE:     cfg.mountains = 1; cfg.mountain_scale = strtod(optarg, NULL); break;
+            case OPT_FLAT:          cfg.flat = 1; break;
+            case OPT_FLAT_Z:        cfg.flat = 1; cfg.flat_z = (int)strtol(optarg, NULL, 0); break;
             case OPT_RIVERS:        cfg.rivers = 1; break;
             case OPT_RIVER_DENSITY: cfg.rivers = 1; cfg.river_density = (int)strtol(optarg, NULL, 0); break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;

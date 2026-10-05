@@ -33,9 +33,12 @@ typedef struct {
     int      continents;    /* bool: multiple continents via placed centers */
     int      continent_count;    /* number of continents when continents=1 */
     double   continent_scale;    /* frequency of the coastline-warp noise */
+    int      flat;          /* bool: level ground everywhere (land z = flat_z) */
+    int      flat_z;             /* the single z used for all land when flat */
     int      mountains;     /* bool: add ridged mountain ranges */
     double   mountain_level;     /* ridge threshold in [0,1]; higher = less rock */
     int      mountain_z;         /* extra z added at mountain peaks */
+    double   mountain_scale;     /* mountain ridge frequency (0 = auto from frequency) */
     int      rivers;        /* bool: carve downhill rivers from high ground */
     int      river_density;      /* source count (0 = auto from map size) */
     int      emit_mapdef;   /* bool: also write map-definitions.snippet.json */
