@@ -19,16 +19,22 @@ static const uint16_t TILES_MOUNTAIN[]      = { 0x00E4, 0x00E5, 0x00E6, 0x00E7 }
 #define PICK(arr, h) ((arr)[(h) % (sizeof(arr) / sizeof((arr)[0]))])
 
 int biome_classify(double h01, double temperature, double moisture) {
-    /* Cold dominates -> snow (incl. high/cold ground). */
-    if (temperature < -0.40)
+    /* Weighted toward a temperate Britannia feel: grass and forest dominate,
+     * with snow/desert/jungle reserved for climate extremes (measured target:
+     * grass > forest > the exotic biomes). The thresholds below widen the
+     * temperate band and make the extremes rarer than a naive split. */
+
+    /* Cold extreme -> snow. */
+    if (temperature < -0.55)
         return TCAT_SNOW;
-    /* Hot -> jungle (wet) or desert (dry). */
-    if (temperature > 0.40)
-        return moisture > 0.05 ? TCAT_JUNGLE : TCAT_DESERT;
-    /* Temperate: low + very wet -> swamp; wet -> forest; else grass. */
-    if (h01 < 0.14 && moisture > 0.35)
+    /* Hot extreme -> jungle (wet) or desert (dry). */
+    if (temperature > 0.55)
+        return moisture > 0.15 ? TCAT_JUNGLE : TCAT_DESERT;
+    /* Temperate: low + very wet -> swamp; moderately wet -> forest; else grass
+     * (grass is the default, so it stays the most common biome). */
+    if (h01 < 0.12 && moisture > 0.40)
         return TCAT_SWAMP;
-    if (moisture > 0.12)
+    if (moisture > 0.20)
         return TCAT_FOREST;
     return TCAT_GRASS;
 }

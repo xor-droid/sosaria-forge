@@ -552,6 +552,13 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 if (d < minpair) minpair = d;
             }
         R = 0.40 * minpair;
+        /* Land-coverage target: size the continent radius so land ~= the
+         * requested fraction of the map (Britannia is ~50% land, not ~10%).
+         * The 1.35 factor compensates for coastline/noise losses inside R. */
+        if (cfg->land_coverage > 0.0) {
+            double area = cfg->land_coverage * (double)W * (double)H / (double)ncen;
+            R = 1.60 * sqrt(area / 3.14159265358979);
+        }
     }
 
     noise_layer *elev = noise_layer_create(cfg->seed, NOISE_LAYER_ELEVATION,
@@ -560,6 +567,9 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                                              cfg->frequency * 2.0,
                                              cfg->octaves > 2 ? cfg->octaves - 1 : cfg->octaves);
     noise_layer *cont = NULL, *mtn = NULL, *temp = NULL;
+    /* Rolling-hill relief: low-frequency so hills form regions, not fuzz. */
+    noise_layer *hill = noise_layer_create(cfg->seed, NOISE_LAYER_HILL,
+                                           cfg->frequency * 1.5, 4);
     if (cfg->biomes)
         temp = noise_layer_create(cfg->seed, NOISE_LAYER_TEMPERATURE,
                                   cfg->frequency * 0.6, 3);
@@ -578,9 +588,9 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
         mtn = noise_layer_create_ridged(cfg->seed, NOISE_LAYER_DETAIL, mfreq,
                                         cfg->octaves > 4 ? 4 : cfg->octaves);
     }
-    if (!elev || !moist || (cfg->continents && !cont) || (cfg->mountains && !mtn)
+    if (!elev || !moist || !hill || (cfg->continents && !cont) || (cfg->mountains && !mtn)
         || (cfg->biomes && !temp)) {
-        noise_layer_free(elev); noise_layer_free(moist);
+        noise_layer_free(elev); noise_layer_free(moist); noise_layer_free(hill);
         noise_layer_free(cont); noise_layer_free(mtn); noise_layer_free(temp);
         free(hf); terrain_free(g); return -1;
     }
@@ -626,7 +636,7 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 double nxe = (double)x * inv_halfw - 1.0;
                 double nye = (double)y * inv_halfh - 1.0;
                 double em = fabs(nxe) > fabs(nye) ? fabs(nxe) : fabs(nye);
-                double et = (em - 0.80) / (1.0 - 0.80);
+                double et = (em - 0.90) / (1.0 - 0.90);   /* only the outer 10% */
                 if (et < 0.0) et = 0.0;
                 e -= 3.0 * et * et;
                 /* Smooth macro height (cone) for land height + river routing. */
@@ -660,15 +670,19 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 double h = hbase;             /* roughly [0,1] inland */
                 if (h < 0.0) h = 0.0;
                 if (h > 1.0) h = 1.0;
-                /* z carries fine detail for micro-relief... */
-                double hh = 0.65 * h + 0.35 * (e_detail * 0.5 + 0.5);
-                if (hh < 0.0) hh = 0.0;
-                if (hh > 1.0) hh = 1.0;
-                z = (int)lround(hh * (double)land_zmax);
+                /* Lowland relief (measured from the real map): most land is a
+                 * flat plain near sea level, a minority rises into rolling
+                 * hills, and mountains (below) are the steep exception. Only
+                 * where the hill noise is high does the ground lift; elsewhere
+                 * z stays ~0 with a little micro-variation. */
+                double hillv = noise_layer_sample(hill, x, y);   /* [-1,1] */
+                double ha = (hillv - 0.15) / 0.85;
+                if (ha < 0.0) ha = 0.0;
+                z = (int)lround(pow(ha, 1.6) * (double)land_zmax + e_detail * 1.5);
+                if (z < 0) z = 0;
 
-                /* ...but the river ROUTING height is the SMOOTH macro slope
-                 * (monotonic toward the coast) so downhill tracing is not
-                 * trapped by detail-noise pits. */
+                /* River ROUTING height is the SMOOTH macro slope (monotonic
+                 * toward the coast) so downhill tracing is not trapped by pits. */
                 double route = h;
 
                 /* Mountains: ridged ridges on sufficiently inland/high ground. */
@@ -697,8 +711,8 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                 double mo = noise_layer_sample(moist, x, y);
                 if (isMountain) {
                     cat = TCAT_MOUNTAIN;
-                } else if (hh > 0.72) {
-                    cat = TCAT_HILL;
+                } else if (ha > 0.55) {
+                    cat = TCAT_HILL;                 /* rolling-hill ground -> dirt */
                 } else if (cfg->biomes) {
                     /* Climate: temperature by latitude (poles cold, centre hot),
                      * modulated by noise and cooled with elevation. */
@@ -706,8 +720,8 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
                     double lat = 1.0 - 2.0 * fabs(ny2 - 0.5);       /* 0 poles .. 1 centre */
                     double temperature = (lat * 2.0 - 1.0) * 0.65
                                        + noise_layer_sample(temp, x, y) * 0.25
-                                       - hh * 0.5 + cfg->temperature_bias;
-                    cat = biome_classify(hh, temperature, mo);
+                                       - h * 0.40 + cfg->temperature_bias;
+                    cat = biome_classify(h, temperature, mo);
                 } else {
                     cat = (mo > 0.1) ? TCAT_FOREST : TCAT_GRASS;
                 }
@@ -735,7 +749,7 @@ int terrain_generate(terrain_grid *g, const mapgen_config *cfg,
     if (!cfg->flat)
         limit_slope(g, cfg);
 
-    noise_layer_free(elev); noise_layer_free(moist);
+    noise_layer_free(elev); noise_layer_free(moist); noise_layer_free(hill);
     noise_layer_free(cont); noise_layer_free(mtn); noise_layer_free(temp);
     free(hf);
     return 0;

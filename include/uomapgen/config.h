@@ -24,8 +24,9 @@ typedef struct {
     double   frequency;     /* base noise frequency */
     int      octaves;       /* fbm octaves */
     int      max_slope;     /* max |z| step between adjacent land tiles */
-    int      land_z_max;    /* highest land z produced from elevation */
+    int      land_z_max;    /* rolling-hill ceiling z (plains stay near 0) */
     int      water_z;       /* flat z assigned to water cells */
+    double   land_coverage; /* target land fraction 0..1 (0 = legacy radius) */
     int      continent;     /* bool: apply radial falloff -> single central continent */
     double   continent_radius;   /* [0,1): solid-land core radius before falloff */
     double   continent_strength; /* how hard edges are pushed to ocean (>0) */

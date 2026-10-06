@@ -48,7 +48,9 @@ enum {
     OPT_NO_BEACHES,
     OPT_BEACH_WIDTH,
     OPT_NO_LAKES,
-    OPT_NO_PASSES
+    OPT_NO_PASSES,
+    OPT_LAND_COVERAGE,
+    OPT_BRITANNIA
 };
 
 static void print_version(void) {
@@ -77,7 +79,7 @@ static void print_help(const char *argv0) {
 "  --frequency <float>   Base noise frequency (default 0.004).\n"
 "  --octaves <int>       fBm octaves (default 5).\n"
 "  --max-slope <int>     Max z step between adjacent land tiles (default 4).\n"
-"  --land-z-max <int>    Highest land z from elevation, 0..127 (default 45).\n"
+"  --land-z-max <int>    Rolling-hill ceiling z; plains stay near 0 (default 25).\n"
 "  --water-z <int>       Flat z for water cells (default -5).\n"
 "  --continent           Radial falloff: one large central landmass ringed by ocean.\n"
 "  --continent-radius <f>    Solid-land core radius, [0,1) (default 0.55; implies --continent).\n"
@@ -85,6 +87,10 @@ static void print_help(const char *argv0) {
 "  --continent-power <f>     Falloff curvature (default 2.0; implies --continent).\n"
 "  --continents          Multiple continents (placed centers), ocean between them.\n"
 "  --continent-count <n>     Number of continents (default 3; implies --continents).\n"
+"  --land-coverage <f>       Target land fraction 0..0.95 (sizes continents so land\n"
+"                            ~= f; e.g. 0.5 for a Britannia-like half-land world).\n"
+"  --britannia               Profile: one large ~50%%-land continent, lowland relief,\n"
+"                            mountains + rivers, temperate biomes (pair w/ --preset felucca).\n"
 "  --continent-scale <f>     Coastline-warp frequency (default 0.00045).\n"
 "  --flat                Level non-mountain ground to one z (mountains keep their height).\n"
 "  --flat-z <int>            The z for flat ground; mountains rise above it (default 0; implies --flat).\n"
@@ -195,6 +201,8 @@ int main(int argc, char **argv) {
         { "beach-width",        required_argument, 0, OPT_BEACH_WIDTH },
         { "no-lakes",    no_argument,       0, OPT_NO_LAKES },
         { "no-passes",   no_argument,       0, OPT_NO_PASSES },
+        { "land-coverage",      required_argument, 0, OPT_LAND_COVERAGE },
+        { "britannia",   no_argument,       0, OPT_BRITANNIA },
         { "tiledata",    required_argument, 0, 'T' },
         { "preview",     required_argument, 0, 'P' },
         { "emit-mapdef", no_argument,       0, 'M' },
@@ -246,6 +254,15 @@ int main(int argc, char **argv) {
             case OPT_BEACH_WIDTH:   cfg.beach_width = (int)strtol(optarg, NULL, 0); break;
             case OPT_NO_LAKES:      cfg.lakes = 0; break;
             case OPT_NO_PASSES:     cfg.passes = 0; break;
+            case OPT_LAND_COVERAGE: cfg.land_coverage = strtod(optarg, NULL); break;
+            case OPT_BRITANNIA:
+                /* Britannia profile: one large continent (~half the map is
+                 * land), lowland-dominant relief, mountains + rivers, temperate
+                 * biomes. Combine with --preset felucca for the real size. */
+                cfg.continents = 1; cfg.continent_count = 1;
+                cfg.land_coverage = 0.55; cfg.sea_level = -0.12;
+                cfg.mountains = 1; cfg.rivers = 1;
+                break;
             case 'T': snprintf(cfg.tiledata_path, sizeof(cfg.tiledata_path), "%s", optarg); break;
             case 'P': snprintf(cfg.preview_path, sizeof(cfg.preview_path), "%s", optarg); break;
             case 'M': cfg.emit_mapdef = 1; break;
